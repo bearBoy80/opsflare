@@ -41,6 +41,7 @@
   "errors": {
     "account-unreadable": "无法读取本地账户，请重置后继续。",
     "account-reset-failed": "无法重置本地账户，请重试。",
+    "account-unavailable": "安全存储暂时不可用，请解锁设备后重试。",
     "invalid-token": "API 令牌无效或已过期。",
     "forbidden": "当前凭证没有访问该资源的权限。请为令牌补充相应权限，或重新连接账号。",
     "network": "无法连接 Cloudflare，请检查网络。",
@@ -64,6 +65,7 @@
     "passwordPlaceholder": "密码",
     "enterPassword": "请输入密码。",
     "incorrectPassword": "密码不正确。",
+    "lockedOut": "错误次数过多，请在 {{time}} 后重试。",
     "unlock": "解锁",
     "unlocking": "解锁中…",
     "authenticating": "验证中…",
@@ -78,7 +80,8 @@
   "accountError": {
     "title": "本地账户不可用",
     "reset": "重置本地账户",
-    "warning": "此操作仅移除本设备上的应用登录信息。"
+    "retry": "重试",
+    "warning": "此操作将移除本设备上的应用登录信息及所有已连接的 Cloudflare 凭据。"
   },
   "onboarding": {
     "loadingA11y": "正在加载引导进度",
@@ -345,7 +348,8 @@
     "disconnectCredential": "解绑此凭据",
     "disconnectMessage": "从此设备移除“{{label}}”及其 API 令牌？",
     "disconnectMessageMulti": "从此设备移除“{{label}}”？该凭据覆盖的 {{count}} 个账号都将失去访问。",
-    "disconnect": "解绑"
+    "disconnect": "解绑",
+    "disconnectError": "无法解绑该凭据，请重试。"
   },
   "language": {
     "title": "语言",

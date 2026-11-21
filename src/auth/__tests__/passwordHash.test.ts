@@ -32,6 +32,7 @@ import * as Crypto from 'expo-crypto';
 import {
   CURRENT_PASSWORD_HASH_VERSION,
   derivePasswordHash,
+  PBKDF2_ITERATIONS,
 } from '../passwordHash';
 
 const mockDigestStringAsync = jest.mocked(Crypto.digestStringAsync);
@@ -43,7 +44,9 @@ const expectedDigest =
 beforeEach(() => mockDigestStringAsync.mockClear());
 
 test('derives the version 2 SHA-256 digest from the domain-separated password input', async () => {
-  await expect(derivePasswordHash(password, saltHex)).resolves.toBe(expectedDigest);
+  await expect(derivePasswordHash(password, saltHex, 2)).resolves.toBe(
+    expectedDigest,
+  );
 
   expect(mockDigestStringAsync).toHaveBeenCalledWith(
     Crypto.CryptoDigestAlgorithm.SHA256,
@@ -52,6 +55,34 @@ test('derives the version 2 SHA-256 digest from the domain-separated password in
   );
 });
 
-test('exports version 2 as the current password hash version', () => {
-  expect(CURRENT_PASSWORD_HASH_VERSION).toBe(2);
+test('derives version 3 with PBKDF2-HMAC-SHA256 over a domain-separated salt', async () => {
+  // Node's own PBKDF2 as an independent reference for the JS implementation.
+  const { pbkdf2Sync } = jest.requireActual('crypto') as {
+    pbkdf2Sync: (
+      password: string,
+      salt: Uint8Array,
+      iterations: number,
+      keylen: number,
+      digest: string,
+    ) => { toString: (encoding: 'hex') => string };
+  };
+  const salt = new Uint8Array([
+    ...new TextEncoder().encode('opsflare-local-account:v3\0'),
+    ...(saltHex.match(/../g) ?? []).map((byte) => parseInt(byte, 16)),
+  ]);
+  const expected = pbkdf2Sync(
+    password,
+    salt,
+    PBKDF2_ITERATIONS,
+    32,
+    'sha256',
+  ).toString('hex');
+
+  await expect(derivePasswordHash(password, saltHex)).resolves.toBe(expected);
+  expect(mockDigestStringAsync).not.toHaveBeenCalled();
+});
+
+test('exports version 3 as the current password hash version', () => {
+  expect(CURRENT_PASSWORD_HASH_VERSION).toBe(3);
+  expect(PBKDF2_ITERATIONS).toBeGreaterThanOrEqual(100_000);
 });

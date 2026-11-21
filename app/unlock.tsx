@@ -17,6 +17,11 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/src/auth/AuthGate';
 import { isAutoLockSuspended, suspendAutoLock } from '@/src/auth/autoLock';
 import { getAccount, verifyPassword } from '@/src/auth/localAccount';
+import {
+  clearUnlockThrottle,
+  getUnlockLockout,
+  recordUnlockFailure,
+} from '@/src/auth/unlockThrottle';
 import { AuthTextInput } from '@/src/components/AuthTextInput';
 import { useTheme } from '@/src/theme/ThemeContext';
 import {
@@ -28,6 +33,17 @@ import {
 } from '@/src/theme/tokens';
 
 type AuthMode = 'password' | 'biometric' | null;
+
+/** Rounds a lockout up to whole seconds, or minutes once it is long. */
+const lockoutTime = (ms: number) =>
+  ms >= 120_000
+    ? `${Math.ceil(ms / 60_000)} min`
+    : `${Math.max(1, Math.ceil(ms / 1000))} s`;
+
+/** A stale counter must never block an unlock that already succeeded. */
+const clearThrottleQuietly = () => {
+  void clearUnlockThrottle().catch(() => {});
+};
 
 const isBiometricCancellation = (error: unknown) => {
   const code =
@@ -126,6 +142,7 @@ export default function Unlock() {
           isForeground.current &&
           isMounted.current
         ) {
+          clearThrottleQuietly();
           unlock();
           return;
         }
@@ -195,9 +212,9 @@ export default function Unlock() {
         setName(account.name);
         setBiometricsEnabled(account.biometricsEnabled);
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (active) {
-          reportAccountError();
+          reportAccountError(cause);
         }
       });
 
@@ -225,19 +242,32 @@ export default function Unlock() {
       requestAnimationFrame(() => resolve());
     })
       .then(async () => {
+        const lockout = await getUnlockLockout();
+        if (lockout > 0) {
+          if (isMounted.current) {
+            setError(t('unlock.lockedOut', { time: lockoutTime(lockout) }));
+          }
+          return;
+        }
         if (await verifyPassword(password)) {
+          clearThrottleQuietly();
           if (isMounted.current) {
             unlock();
           }
           return;
         }
+        const triggered = await recordUnlockFailure();
         if (isMounted.current) {
-          setError(t('unlock.incorrectPassword'));
+          setError(
+            triggered > 0
+              ? t('unlock.lockedOut', { time: lockoutTime(triggered) })
+              : t('unlock.incorrectPassword'),
+          );
         }
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (isMounted.current) {
-          reportAccountError();
+          reportAccountError(cause);
         }
       })
       .finally(() => {

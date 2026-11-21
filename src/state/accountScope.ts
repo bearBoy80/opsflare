@@ -26,6 +26,25 @@ export function setAccountScope(accountId: string | null): void {
   emit();
 }
 
+/**
+ * Falls back to "All accounts" when the selected account is no longer
+ * reachable (its credential was disconnected, or it vanished upstream).
+ * Otherwise every tab filters down to nothing, and the scope banner — which
+ * looks the name up in the same data — disappears too, so there is no hint as
+ * to why.
+ */
+export function reconcileAccountScope(accountIds: Iterable<string>): void {
+  if (currentScope === null) {
+    return;
+  }
+  for (const id of accountIds) {
+    if (id === currentScope) {
+      return;
+    }
+  }
+  setAccountScope(null);
+}
+
 export function getAccountScope(): string | null {
   return currentScope;
 }

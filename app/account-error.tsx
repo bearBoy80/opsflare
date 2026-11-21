@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ShieldAlert } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '@/src/auth/AuthGate';
+import { ACCOUNT_UNAVAILABLE_KEY, useAuth } from '@/src/auth/AuthGate';
 import { useTheme } from '@/src/theme/ThemeContext';
 import {
   accent,
@@ -14,7 +14,9 @@ import {
 
 export default function AccountError() {
   const { t } = useTranslation();
-  const { errorKey, resetAccount } = useAuth();
+  const { errorKey, resetAccount, retryAccount } = useAuth();
+  // A transient storage failure must not be answered with a destructive reset.
+  const retryable = errorKey === ACCOUNT_UNAVAILABLE_KEY;
   const { colors, mode } = useTheme();
 
   return (
@@ -34,18 +36,32 @@ export default function AccountError() {
         <Text style={[styles.message, { color: label(mode, 0.55) }]}>
           {errorKey ? t(errorKey) : null}
         </Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => void resetAccount()}
-          style={[styles.button, { backgroundColor: accent.red }]}
-        >
-          <Text style={[styles.buttonText, { color: foreground.onAccent }]}>
-            {t('accountError.reset')}
-          </Text>
-        </Pressable>
-        <Text style={[styles.warning, { color: label(mode, 0.42) }]}>
-          {t('accountError.warning')}
-        </Text>
+        {retryable ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={retryAccount}
+            style={[styles.button, { backgroundColor: accent.orange }]}
+          >
+            <Text style={[styles.buttonText, { color: foreground.onAccent }]}>
+              {t('accountError.retry')}
+            </Text>
+          </Pressable>
+        ) : (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void resetAccount()}
+              style={[styles.button, { backgroundColor: accent.red }]}
+            >
+              <Text style={[styles.buttonText, { color: foreground.onAccent }]}>
+                {t('accountError.reset')}
+              </Text>
+            </Pressable>
+            <Text style={[styles.warning, { color: label(mode, 0.42) }]}>
+              {t('accountError.warning')}
+            </Text>
+          </>
+        )}
       </View>
     </SafeAreaView>
   );

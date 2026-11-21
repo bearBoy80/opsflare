@@ -5,7 +5,11 @@ import {
   verifyToken,
   type CfAccountRef,
 } from './api';
-import type { OauthIdentity, OauthTokens } from './oauth';
+import {
+  revokeOauthTokens,
+  type OauthIdentity,
+  type OauthTokens,
+} from './oauth';
 
 /** Placeholder labels we replace once a real account name is discovered. */
 const PLACEHOLDER_LABELS = new Set(['API Token', 'Cloudflare OAuth']);
@@ -225,11 +229,44 @@ export async function addOauthConnection(
   return connection;
 }
 
+/**
+ * Deletes a credential.
+ *
+ * The secrets go first and the list entry last: if a keychain call fails
+ * halfway, the connection is still listed (and can be removed again) instead
+ * of leaving a token in the keychain that nothing points to any more.
+ *
+ * OAuth grants are also revoked at Cloudflare, so disconnecting really cuts
+ * the app off. That call is best-effort and not awaited — the local removal
+ * must not hang on a slow network, and a failed revoke still leaves the grant
+ * unusable from this device.
+ */
 export async function removeConnection(connectionId: string): Promise<void> {
-  const existing = await listConnections();
-  await saveConnections(existing.filter((item) => item.id !== connectionId));
+  const oauthTokens = await getConnectionOauthTokens(connectionId).catch(
+    () => null,
+  );
+
   await SecureStore.deleteItemAsync(tokenKey(connectionId));
   await SecureStore.deleteItemAsync(oauthKey(connectionId));
+  const existing = await listConnections();
+  await saveConnections(existing.filter((item) => item.id !== connectionId));
+
+  if (oauthTokens) {
+    void Promise.resolve()
+      .then(() => revokeOauthTokens(oauthTokens))
+      .catch(() => {});
+  }
+}
+
+/** Deletes every stored credential, e.g. when the local account is reset. */
+export async function removeAllConnections(): Promise<void> {
+  const existing = await listConnections();
+  for (const connection of existing) {
+    await removeConnection(connection.id);
+  }
+  // Also drop the list itself, in case it held entries the parser rejected.
+  await SecureStore.deleteItemAsync(CONNECTIONS_KEY);
+  connectionsCache = null;
 }
 
 export async function getConnectionToken(

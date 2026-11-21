@@ -30,6 +30,7 @@ import {
   type CloudflareConnection,
 } from '@/src/cloudflare/connections';
 import { invalidateAllSnapshots } from '@/src/cloudflare/cache';
+import { reconcileAccountScope } from '@/src/state/accountScope';
 import { getBearerForConnection } from '@/src/cloudflare/resources';
 import {
   AccountChip,
@@ -40,6 +41,7 @@ import {
   SegmentedControl,
   showActionMenu,
   ToggleRow,
+  useToast,
 } from '@/src/components/ui';
 import { useTabBarInset } from '@/src/components/useTabBarInset';
 import { useTheme } from '@/src/theme/ThemeContext';
@@ -94,6 +96,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { t } = useTranslation();
   const { lock, reportAccountError } = useAuth();
+  const { showToast } = useToast();
   const { mode, colors, preference, setPreference } = useTheme();
   const bottomInset = useTabBarInset();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -157,10 +160,24 @@ export default function SettingsScreen() {
           label: t('settings.disconnect'),
           destructive: true,
           onPress: () => {
-            void removeConnection(connection.id).then(() => {
-              invalidateAllSnapshots();
-              return listConnections().then(setConnections);
-            });
+            void removeConnection(connection.id)
+              .then(async () => {
+                invalidateAllSnapshots();
+                const remaining = await listConnections();
+                setConnections(remaining);
+                reconcileAccountScope(
+                  remaining.flatMap((item) =>
+                    item.accounts.map((account) => account.id),
+                  ),
+                );
+              })
+              .catch(() => {
+                showToast(t('settings.disconnectError'), 'error');
+                // Show what actually survived the partial removal.
+                void listConnections()
+                  .then(setConnections)
+                  .catch(() => {});
+              });
           },
         },
       ],
@@ -181,9 +198,9 @@ export default function SettingsScreen() {
           setBiometrics(account.biometricsEnabled);
         }
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (active) {
-          reportAccountError();
+          reportAccountError(cause);
         }
       });
 

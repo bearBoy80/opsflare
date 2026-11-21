@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { AppState, type AppStateStatus } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { AuthGateProvider, useAuth } from '../AuthGate';
 import { resetAutoLock, suspendAutoLock } from '../autoLock';
 import {
@@ -221,4 +222,47 @@ test('surfaces corrupt storage and supports an explicit local reset', async () =
 
   expect(result.current.status).toBe('no-account');
   expect(mockStore.has('local-account-v2')).toBe(false);
+});
+
+test('reset also removes every Cloudflare credential', async () => {
+  mockStore.set('local-account-v2', '{"name":"Ada"}');
+  mockStore.set(
+    'cf-connections-v1',
+    JSON.stringify([
+      {
+        id: 'tok-1',
+        label: 'Acme',
+        authType: 'token',
+        accounts: [{ id: 'acc-1', name: 'Acme' }],
+        createdAt: 1,
+      },
+    ]),
+  );
+  mockStore.set('cf-token-tok-1', 'secret-token');
+  const { result } = renderHook(() => useAuth(), { wrapper });
+  await waitFor(() => expect(result.current.status).toBe('error'));
+
+  await act(async () => result.current.resetAccount());
+
+  expect(result.current.status).toBe('no-account');
+  // The next local account must not inherit the previous user's credentials.
+  expect(mockStore.has('cf-token-tok-1')).toBe(false);
+  expect(mockStore.has('cf-connections-v1')).toBe(false);
+});
+
+test('an unavailable keychain offers a retry instead of a reset', async () => {
+  await createAccount('Ada', 'hunter2secret', false);
+  jest
+    .mocked(SecureStore.getItemAsync)
+    .mockRejectedValueOnce(new Error('interaction not allowed'));
+  const { result } = renderHook(() => useAuth(), { wrapper });
+
+  await waitFor(() => expect(result.current.status).toBe('error'));
+  expect(result.current.errorKey).toBe('errors.account-unavailable');
+
+  act(() => result.current.retryAccount());
+
+  await waitFor(() => expect(result.current.status).toBe('locked'));
+  expect(result.current.errorKey).toBeNull();
+  expect(mockStore.has('local-account-v2')).toBe(true);
 });

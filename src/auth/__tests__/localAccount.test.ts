@@ -103,16 +103,16 @@ test('stores only a salted password hash and verifies the password', async () =>
   expect(await verifyPassword('wrong')).toBe(false);
 });
 
-test('persists version 2 for a normally created account', async () => {
+test('persists version 3 for a normally created account', async () => {
   await createAccount('Ada', 'hunter2secret', false);
 
   expect(JSON.parse(mockStore.get('local-account-v2') ?? 'null')).toMatchObject({
-    passwordHashVersion: 2,
+    passwordHashVersion: 3,
     name: 'Ada',
   });
 });
 
-test('persists version 2 for an onboarding account', async () => {
+test('persists version 3 for an onboarding account', async () => {
   await createOnboardingAccount(
     { organization: 'Acme', name: 'Ada', email: 'ada@example.com' },
     'hunter2secret',
@@ -120,7 +120,7 @@ test('persists version 2 for an onboarding account', async () => {
   );
 
   expect(JSON.parse(mockStore.get('local-account-v2') ?? 'null')).toMatchObject({
-    passwordHashVersion: 2,
+    passwordHashVersion: 3,
     onboardingStep: 'connect',
   });
 });
@@ -135,11 +135,46 @@ test('verifies with the current hash without rewriting the stored account', asyn
 
   expect(mockStore.get('local-account-v2')).toBe(storedBefore);
   expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
-  expect(mockDigestStringAsync).toHaveBeenCalledWith(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    `opsflare-local-account:v2\0${'ab'.repeat(16)}\0hunter2secret`,
-    { encoding: Crypto.CryptoEncoding.HEX },
-  );
+  // Version 3 is PBKDF2 in JS; the legacy native SHA-256 is not involved.
+  expect(mockDigestStringAsync).not.toHaveBeenCalled();
+});
+
+const legacyAccount = {
+  name: 'Ada',
+  organization: '',
+  email: '',
+  saltHex: 'ab'.repeat(16),
+  hashHex: expectedDigest,
+  passwordHashVersion: 2,
+  biometricsEnabled: true,
+  onboardingComplete: true,
+  onboardingStep: 'done',
+  createdAt: 0,
+};
+
+test('upgrades a version 2 hash to version 3 on a correct password', async () => {
+  mockStore.set('local-account-v2', JSON.stringify(legacyAccount));
+
+  await expect(verifyPassword('hunter2secret')).resolves.toBe(true);
+
+  const upgraded = JSON.parse(mockStore.get('local-account-v2') ?? 'null');
+  expect(upgraded).toMatchObject({
+    name: 'Ada',
+    biometricsEnabled: true,
+    passwordHashVersion: 3,
+  });
+  expect(upgraded.hashHex).not.toBe(expectedDigest);
+  await expect(verifyPassword('hunter2secret')).resolves.toBe(true);
+  await expect(verifyPassword('wrong')).resolves.toBe(false);
+});
+
+test('leaves a version 2 hash alone on a wrong password', async () => {
+  const stored = JSON.stringify(legacyAccount);
+  mockStore.set('local-account-v2', stored);
+
+  await expect(verifyPassword('wrong')).resolves.toBe(false);
+
+  expect(mockStore.get('local-account-v2')).toBe(stored);
 });
 
 test('ignores unpublished version 1 data stored under its prior key', async () => {
@@ -171,7 +206,7 @@ test('rejects an unknown password hash version as corrupt data', async () => {
       email: '',
       saltHex: 'ab'.repeat(16),
       hashHex: expectedDigest,
-      passwordHashVersion: 3,
+      passwordHashVersion: 4,
       biometricsEnabled: false,
       onboardingComplete: true,
       onboardingStep: 'done',

@@ -15,14 +15,20 @@ jest.mock('../api', () => ({
   listAccounts: jest.fn(),
 }));
 
+jest.mock('../oauth', () => ({
+  revokeOauthTokens: jest.fn(async () => {}),
+}));
+
 import * as SecureStore from 'expo-secure-store';
 import { listAccounts, verifyToken } from '../api';
+import { revokeOauthTokens } from '../oauth';
 import {
   addConnection,
   addOauthConnection,
   getConnectionOauthTokens,
   getConnectionToken,
   listConnections,
+  removeAllConnections,
   removeConnection,
   resetConnectionsCache,
 } from '../connections';
@@ -191,4 +197,49 @@ describe('OAuth connections', () => {
       getConnectionOauthTokens('oauth-user-1'),
     ).resolves.toBeNull();
   });
+
+  test('remove revokes the grant at Cloudflare', async () => {
+    await addOauthConnection(tokens, identity);
+
+    await removeConnection('oauth-user-1');
+    await Promise.resolve();
+
+    expect(revokeOauthTokens).toHaveBeenCalledWith(tokens);
+  });
+
+  test('a failed revoke does not fail the local removal', async () => {
+    jest.mocked(revokeOauthTokens).mockRejectedValueOnce(new Error('offline'));
+    await addOauthConnection(tokens, identity);
+
+    await expect(removeConnection('oauth-user-1')).resolves.toBeUndefined();
+    await expect(listConnections()).resolves.toEqual([]);
+  });
+});
+
+test('a failed secret delete keeps the connection listed for a retry', async () => {
+  await addConnection('secret-token');
+  jest
+    .mocked(SecureStore.deleteItemAsync)
+    .mockRejectedValueOnce(new Error('keychain busy'));
+
+  await expect(removeConnection('tok-1')).rejects.toThrow('keychain busy');
+
+  // Still listed, so the user can disconnect again instead of the token
+  // lingering in the keychain with nothing pointing at it.
+  await expect(listConnections()).resolves.toHaveLength(1);
+  await expect(removeConnection('tok-1')).resolves.toBeUndefined();
+  await expect(getConnectionToken('tok-1')).resolves.toBeNull();
+});
+
+test('removeAllConnections wipes every credential and the list', async () => {
+  await addConnection('secret-token');
+  await addOauthConnection(
+    { accessToken: 'access', refreshToken: 'refresh' },
+    { sub: 'user-1' },
+  );
+
+  await removeAllConnections();
+
+  await expect(listConnections()).resolves.toEqual([]);
+  expect(mockStore.size).toBe(0);
 });

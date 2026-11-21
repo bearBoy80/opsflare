@@ -63,9 +63,13 @@ async function resolveAccountsUncached(): Promise<ResolvedAccounts> {
   const connections = await listConnections();
   const issues: ConnectionIssue[] = [];
   const byAccount = new Map<string, ResolvedAccount>();
+  // Collected per connection and merged afterwards in stored order. Merging as
+  // each lookup lands would let whichever credential answers first own a
+  // shared account, so the bearer behind it would change between refreshes.
+  const resolved: ResolvedAccount[][] = connections.map(() => []);
 
   await Promise.all(
-    connections.map(async (connection) => {
+    connections.map(async (connection, index) => {
       try {
         const bearer = await getConnectionBearer(connection);
         if (!bearer) {
@@ -78,16 +82,12 @@ async function resolveAccountsUncached(): Promise<ResolvedAccounts> {
           connection.accounts.length > 0
             ? connection.accounts
             : await listAccounts(bearer);
-        for (const account of accounts) {
-          if (!byAccount.has(account.id)) {
-            byAccount.set(account.id, {
-              accountId: account.id,
-              accountName: account.name,
-              connectionId: connection.id,
-              bearer,
-            });
-          }
-        }
+        resolved[index] = accounts.map((account) => ({
+          accountId: account.id,
+          accountName: account.name,
+          connectionId: connection.id,
+          bearer,
+        }));
       } catch (cause) {
         if (__DEV__) {
           console.warn(
@@ -106,6 +106,12 @@ async function resolveAccountsUncached(): Promise<ResolvedAccounts> {
       }
     }),
   );
+
+  for (const account of resolved.flat()) {
+    if (!byAccount.has(account.accountId)) {
+      byAccount.set(account.accountId, account);
+    }
+  }
 
   return {
     connectionCount: connections.length,

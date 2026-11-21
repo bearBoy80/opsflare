@@ -8,7 +8,26 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 import { isAutoLockSuspended } from './autoLock';
-import { deleteAccount, getAccount } from './localAccount';
+import { wipeCloudflareData } from '../cloudflare/wipe';
+import {
+  deleteAccount,
+  getAccount,
+  LocalAccountStorageError,
+} from './localAccount';
+
+/** Error key for a storage failure that a retry may clear. */
+export const ACCOUNT_UNAVAILABLE_KEY = 'errors.account-unavailable';
+
+/**
+ * Only data that was read and found invalid gets the destructive reset. A
+ * keychain that is merely unavailable (prewarm before first unlock, a lock
+ * state race) holds a perfectly good login, so it is offered a retry instead.
+ */
+function errorKeyFor(cause: unknown): string {
+  return cause instanceof LocalAccountStorageError && cause.code === 'corrupt'
+    ? 'errors.account-unreadable'
+    : ACCOUNT_UNAVAILABLE_KEY;
+}
 
 export type AuthStatus =
   | 'loading'
@@ -25,7 +44,9 @@ interface AuthValue {
   unlock: () => void;
   lock: () => void;
   onOnboardingCompleted: () => void;
-  reportAccountError: () => void;
+  reportAccountError: (cause?: unknown) => void;
+  /** Re-reads the local account after a transient storage failure. */
+  retryAccount: () => void;
   resetAccount: () => Promise<void>;
 }
 
@@ -43,12 +64,15 @@ export function AuthGateProvider({
   // still be null this early, which we treat as foreground.
   const isForeground = useRef(AppState.currentState !== 'background');
 
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
   useEffect(() => {
     let active = true;
 
     void getAccount()
       .then((account) => {
         if (active) {
+          setErrorKey(null);
           setStatus(
             !account
               ? 'no-account'
@@ -58,9 +82,9 @@ export function AuthGateProvider({
           );
         }
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (active) {
-          setErrorKey('errors.account-unreadable');
+          setErrorKey(errorKeyFor(cause));
           setStatus('error');
         }
       });
@@ -68,7 +92,7 @@ export function AuthGateProvider({
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -106,12 +130,20 @@ export function AuthGateProvider({
         setErrorKey(null);
         setStatus(isForeground.current ? 'unlocked' : 'locked');
       },
-      reportAccountError: () => {
-        setErrorKey('errors.account-unreadable');
+      reportAccountError: (cause?: unknown) => {
+        setErrorKey(errorKeyFor(cause));
         setStatus('error');
+      },
+      retryAccount: () => {
+        setStatus('loading');
+        setLoadAttempt((attempt) => attempt + 1);
       },
       resetAccount: async () => {
         try {
+          // Credentials first: if this fails the login is still there and the
+          // reset can be retried, instead of orphaning tokens for the next
+          // account created on this device.
+          await wipeCloudflareData();
           await deleteAccount();
           setErrorKey(null);
           setStatus('no-account');

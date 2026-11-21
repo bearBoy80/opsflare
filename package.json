@@ -15,6 +15,7 @@
   "homepage": "https://github.com/bearBoy80/opsflare#readme",
   "private": true,
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "expo": "~57.0.12",
     "expo-auth-session": "~57.0.6",
     "expo-blur": "~57.0.2",

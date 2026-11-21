@@ -16,6 +16,7 @@ import {
   listAccounts,
   listD1Databases,
   listDnsRecords,
+  updateDnsRecord,
   listKvNamespaces,
   listPagesDomains,
   listPagesProjects,
@@ -320,6 +321,48 @@ describe('listDnsRecords', () => {
     expect(mockFetch.mock.calls[1][0]).toContain(
       '/zones/zone-1/dns_records?page=2&per_page=100',
     );
+  });
+});
+
+describe('DNS record priority and updates', () => {
+  test('carries the MX priority through the list', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        result: [
+          {
+            id: 'rec-mx',
+            type: 'MX',
+            name: 'acme.com',
+            content: 'mx2.mail.com',
+            priority: 20,
+          },
+        ],
+        result_info: { total_pages: 1 },
+      }),
+    );
+
+    const [record] = await listDnsRecords('secret', 'zone-1');
+    expect(record.priority).toBe(20);
+  });
+
+  test('edits with PATCH so comment and tags are not overwritten', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ success: true, result: { id: 'rec-1' } }),
+    );
+
+    await updateDnsRecord('secret', 'zone-1', 'rec-1', {
+      type: 'A',
+      name: 'a.acme.com',
+      content: '192.0.2.1',
+    });
+
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/zones/zone-1/dns_records/rec-1',
+    );
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body)).not.toHaveProperty('comment');
   });
 });
 

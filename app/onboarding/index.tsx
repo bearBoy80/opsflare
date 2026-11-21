@@ -50,9 +50,9 @@ export default function Onboarding() {
           setStep(account.onboardingStep);
         }
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (active) {
-          reportAccountError();
+          reportAccountError(cause);
         }
       })
       .finally(() => {

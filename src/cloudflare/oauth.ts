@@ -2,7 +2,9 @@ import Constants from 'expo-constants';
 import {
   exchangeCodeAsync,
   refreshAsync,
+  revokeAsync,
   TokenError,
+  TokenTypeHint,
   type AuthRequest,
   type AuthSessionResult,
   type DiscoveryDocument,
@@ -318,4 +320,35 @@ export async function fetchOauthIdentity(
   }
 
   return { sub: body.sub, email: body.email };
+}
+
+/**
+ * Revokes a grant at Cloudflare. Revoking the refresh token ends the whole
+ * grant; the access token is revoked as well for servers that treat them
+ * separately. Failures are left to the caller, which treats this as
+ * best-effort.
+ */
+export async function revokeOauthTokens(tokens: OauthTokens): Promise<void> {
+  const config = getOauthConfig();
+  if (!config) {
+    return;
+  }
+  if (tokens.refreshToken) {
+    await revokeAsync(
+      {
+        clientId: config.clientId,
+        token: tokens.refreshToken,
+        tokenTypeHint: TokenTypeHint.RefreshToken,
+      },
+      discovery,
+    );
+  }
+  await revokeAsync(
+    {
+      clientId: config.clientId,
+      token: tokens.accessToken,
+      tokenTypeHint: TokenTypeHint.AccessToken,
+    },
+    discovery,
+  );
 }

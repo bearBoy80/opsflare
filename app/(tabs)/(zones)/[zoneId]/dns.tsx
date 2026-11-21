@@ -119,7 +119,8 @@ export default function ZoneDns() {
       type: record?.type ?? 'A',
       name: record?.name ?? '',
       content: record?.content ?? '',
-      priority: '10',
+      priority:
+        record?.priority !== undefined ? String(record.priority) : '10',
       proxied: record?.proxied ?? false,
     });
   }, []);

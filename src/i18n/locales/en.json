@@ -43,6 +43,7 @@
   "errors": {
     "account-unreadable": "The local account could not be read. Reset it to continue.",
     "account-reset-failed": "The local account could not be reset. Please try again.",
+    "account-unavailable": "Secure storage is temporarily unavailable. Unlock your device and try again.",
     "invalid-token": "The API token is invalid or expired.",
     "forbidden": "The credential lacks permission for this resource. Add the missing permission to the token, or reconnect the account.",
     "network": "Could not reach Cloudflare. Check your connection.",
@@ -66,6 +67,7 @@
     "passwordPlaceholder": "Password",
     "enterPassword": "Enter your password.",
     "incorrectPassword": "Incorrect password.",
+    "lockedOut": "Too many incorrect attempts. Try again in {{time}}.",
     "unlock": "Unlock",
     "unlocking": "Unlocking…",
     "authenticating": "Authenticating…",
@@ -80,7 +82,8 @@
   "accountError": {
     "title": "Local account unavailable",
     "reset": "Reset Local Account",
-    "warning": "This removes only the app login on this device."
+    "retry": "Try Again",
+    "warning": "This removes the app login and every connected Cloudflare credential on this device."
   },
   "onboarding": {
     "loadingA11y": "Loading onboarding progress",
@@ -351,7 +354,8 @@
     "disconnectCredential": "Disconnect this credential",
     "disconnectMessage": "Remove \"{{label}}\" and its API token from this device?",
     "disconnectMessageMulti": "Remove \"{{label}}\" from this device? All {{count}} accounts this credential covers will lose access.",
-    "disconnect": "Disconnect"
+    "disconnect": "Disconnect",
+    "disconnectError": "Could not disconnect this credential. Try again."
   },
   "language": {
     "title": "Language",

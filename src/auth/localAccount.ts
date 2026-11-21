@@ -3,7 +3,10 @@ import { getRandomBytes } from 'expo-crypto';
 import {
   CURRENT_PASSWORD_HASH_VERSION,
   derivePasswordHash,
+  isPasswordHashVersion,
+  type PasswordHashVersion,
 } from './passwordHash';
+import { clearUnlockThrottle } from './unlockThrottle';
 
 const STORAGE_KEY = 'local-account-v2';
 
@@ -37,7 +40,7 @@ export interface LocalAccount {
   email: string;
   saltHex: string;
   hashHex: string;
-  passwordHashVersion: typeof CURRENT_PASSWORD_HASH_VERSION;
+  passwordHashVersion: PasswordHashVersion;
   biometricsEnabled: boolean;
   onboardingComplete: boolean;
   onboardingStep: PersistedOnboardingStep;
@@ -76,7 +79,7 @@ function parseAccount(stored: string): LocalAccount {
     candidate.name.trim().length === 0 ||
     !isHex(candidate.saltHex, 32) ||
     !isHex(candidate.hashHex, 64) ||
-    candidate.passwordHashVersion !== CURRENT_PASSWORD_HASH_VERSION ||
+    !isPasswordHashVersion(candidate.passwordHashVersion) ||
     typeof candidate.biometricsEnabled !== 'boolean' ||
     typeof candidate.createdAt !== 'number' ||
     !Number.isFinite(candidate.createdAt)
@@ -187,9 +190,30 @@ export async function verifyPassword(password: string): Promise<boolean> {
   if (!account) {
     return false;
   }
-  return (
-    (await derivePasswordHash(password, account.saltHex)) === account.hashHex
-  );
+  const matches =
+    (await derivePasswordHash(
+      password,
+      account.saltHex,
+      account.passwordHashVersion,
+    )) === account.hashHex;
+
+  if (matches && account.passwordHashVersion !== CURRENT_PASSWORD_HASH_VERSION) {
+    // The plaintext is only ever in hand right here, so this is the one chance
+    // to move a legacy hash onto the current KDF. A failed write leaves the old
+    // hash in place, which still verifies next time.
+    const saltHex = bytesToHex(getRandomBytes(16));
+    try {
+      await saveAccount({
+        ...account,
+        saltHex,
+        hashHex: await derivePasswordHash(password, saltHex),
+        passwordHashVersion: CURRENT_PASSWORD_HASH_VERSION,
+      });
+    } catch {
+      // Keep the unlock: the password was correct.
+    }
+  }
+  return matches;
 }
 
 export async function setBiometricsEnabled(enabled: boolean): Promise<void> {
@@ -204,6 +228,7 @@ export async function setBiometricsEnabled(enabled: boolean): Promise<void> {
 export async function deleteAccount(): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(STORAGE_KEY);
+    await clearUnlockThrottle();
   } catch {
     throw new LocalAccountStorageError('unavailable');
   }

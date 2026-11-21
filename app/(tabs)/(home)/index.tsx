@@ -54,7 +54,10 @@ import {
   ScreenSkeleton,
 } from '@/src/components/ui';
 import { cloudflareErrorMessage } from '@/src/i18n/errors';
-import { useAccountScope } from '@/src/state/accountScope';
+import {
+  reconcileAccountScope,
+  useAccountScope,
+} from '@/src/state/accountScope';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { CollapsibleTitleContainer, CompactHeader, useCollapsibleTitle } from '@/src/components/CollapsibleTitle';
 import { useTabBarInset } from '@/src/components/useTabBarInset';
@@ -211,6 +214,11 @@ export default function Home() {
     return fetchZonesSnapshot({ force })
       .then((zones) => {
         setSnapshot(zones);
+        // A partial snapshot may simply be missing an account that is still
+        // there, so only a clean one may drop a stale selection.
+        if (zones.issues.length === 0) {
+          reconcileAccountScope(zones.accounts.map((account) => account.id));
+        }
         if (!force) {
           // Warm the compute snapshot cache in the background so the compute
           // tab opens without a cold network wait. The shared TTL cache

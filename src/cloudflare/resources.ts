@@ -63,20 +63,19 @@ async function fetchSnapshot(): Promise<ZonesSnapshot> {
   const zonesById = new Map<string, ZoneListItem>();
   const issues: ConnectionIssue[] = [];
 
+  // Merged in stored connection order once every lookup is back, so a zone
+  // visible through several credentials is always served by the same one
+  // rather than by whichever answered first.
+  const zonesByConnection: CfZone[][] = connections.map(() => []);
+
   await Promise.all(
-    connections.map(async (connection) => {
+    connections.map(async (connection, index) => {
       try {
         const bearer = await getConnectionBearer(connection);
         if (!bearer) {
           throw new CloudflareApiError('missing-credential');
         }
-        const zones = await listZones(bearer);
-        for (const zone of zones) {
-          // The same zone can be visible through several credentials.
-          if (!zonesById.has(zone.id)) {
-            zonesById.set(zone.id, { ...zone, connectionId: connection.id });
-          }
-        }
+        zonesByConnection[index] = await listZones(bearer);
       } catch (cause) {
         issues.push({
           connectionId: connection.id,
@@ -89,6 +88,14 @@ async function fetchSnapshot(): Promise<ZonesSnapshot> {
       }
     }),
   );
+
+  connections.forEach((connection, index) => {
+    for (const zone of zonesByConnection[index]) {
+      if (!zonesById.has(zone.id)) {
+        zonesById.set(zone.id, { ...zone, connectionId: connection.id });
+      }
+    }
+  });
 
   const zones = [...zonesById.values()].sort((a, b) =>
     a.name.localeCompare(b.name),

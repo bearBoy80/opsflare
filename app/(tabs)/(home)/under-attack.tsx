@@ -14,6 +14,11 @@ import {
   getBearerForConnection,
   type ZoneListItem,
 } from '@/src/cloudflare/resources';
+import {
+  forgetPreviousSecurityLevel,
+  getPreviousSecurityLevel,
+  rememberPreviousSecurityLevel,
+} from '@/src/cloudflare/securityLevelMemory';
 import { ZoneSubpage } from '@/src/components/ZoneSubpage';
 import {
   Card,
@@ -119,6 +124,10 @@ export default function HomeUnderAttack() {
       const bearer = await getBearerForConnection(zone.connectionId);
       await setZoneSecurityLevel(bearer, zone.id, value);
       setLevels((current) => ({ ...current, [zone.id]: value }));
+      if (value !== 'under_attack') {
+        delete previousLevels.current[zone.id];
+        void forgetPreviousSecurityLevel(zone.id).catch(() => {});
+      }
       showToast(
         value === 'under_attack'
           ? t('home.underAttackOn')
@@ -146,7 +155,16 @@ export default function HomeUnderAttack() {
             label: t('home.underAttackEnable'),
             destructive: true,
             onPress: () => {
-              void applyLevel(zone, 'under_attack');
+              void (async () => {
+                if (current && current !== 'under_attack') {
+                  // Written before the switch, so the level survives even if
+                  // the app is closed while the zone is under attack.
+                  await rememberPreviousSecurityLevel(zone.id, current).catch(
+                    () => {},
+                  );
+                }
+                await applyLevel(zone, 'under_attack');
+              })();
             },
           },
         ],
@@ -154,8 +172,12 @@ export default function HomeUnderAttack() {
       return;
     }
 
-    const restore = previousLevels.current[zone.id] ?? FALLBACK_LEVEL;
-    void applyLevel(zone, restore);
+    void (async () => {
+      const remembered =
+        previousLevels.current[zone.id] ??
+        (await getPreviousSecurityLevel(zone.id).catch(() => null));
+      await applyLevel(zone, remembered ?? FALLBACK_LEVEL);
+    })();
   };
 
   const levelLabel = (value: ZoneSecurityLevel | null): string => {
