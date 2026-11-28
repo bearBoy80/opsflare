@@ -20,11 +20,8 @@ import { useTheme } from '@/src/theme/ThemeContext';
 
 export default function Onboarding() {
   const { t } = useTranslation();
-  const {
-    lock,
-    onOnboardingCompleted,
-    reportAccountError,
-  } = useAuth();
+  const { onAccountCreated, onOnboardingCompleted, reportAccountError } =
+    useAuth();
   const { colors } = useTheme();
   const [step, setStep] = useState<OnboardingStep>('welcome');
   const [loading, setLoading] = useState(true);
@@ -76,7 +73,10 @@ export default function Onboarding() {
     return () => subscription.remove();
   }, []);
 
-  const handleCreated = () => setStep('connect');
+  const handleCreated = () => {
+    onAccountCreated();
+    setStep('connect');
+  };
 
   // Shared by "skip for now" and by a successful credential bind: both leave
   // the connect step behind and land on the final step.
@@ -90,11 +90,7 @@ export default function Onboarding() {
     completionInFlight.current = true;
     try {
       await completeOnboarding();
-      if (completionInterrupted.current) {
-        lock();
-      } else {
-        onOnboardingCompleted();
-      }
+      onOnboardingCompleted({ interrupted: completionInterrupted.current });
     } finally {
       completionInFlight.current = false;
     }

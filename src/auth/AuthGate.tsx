@@ -43,7 +43,16 @@ interface AuthValue {
   errorKey: string | null;
   unlock: () => void;
   lock: () => void;
-  onOnboardingCompleted: () => void;
+  /**
+   * Onboarding has just stored the local account. From here on a password
+   * exists, so leaving the app re-locks it like the console does.
+   */
+  onAccountCreated: () => void;
+  /**
+   * Onboarding finished and was persisted. `interrupted` reports that the app
+   * left the foreground while the completion was being written.
+   */
+  onOnboardingCompleted: (options?: { interrupted?: boolean }) => void;
   reportAccountError: (cause?: unknown) => void;
   /** Re-reads the local account after a transient storage failure. */
   retryAccount: () => void;
@@ -65,6 +74,14 @@ export function AuthGateProvider({
   const isForeground = useRef(AppState.currentState !== 'background');
 
   const [loadAttempt, setLoadAttempt] = useState(0);
+  /**
+   * A local account (and so a password) exists. Onboarding before that point
+   * has nothing to protect; after it, the Connect step may already have
+   * stored a Cloudflare credential.
+   */
+  const hasAccount = useRef(false);
+  /** Unlocking lands back in onboarding rather than the console. */
+  const resumeOnboarding = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -72,14 +89,14 @@ export function AuthGateProvider({
     void getAccount()
       .then((account) => {
         if (active) {
+          hasAccount.current = account !== null;
+          resumeOnboarding.current =
+            account !== null && !account.onboardingComplete;
           setErrorKey(null);
-          setStatus(
-            !account
-              ? 'no-account'
-              : account.onboardingComplete
-                ? 'locked'
-                : 'onboarding',
-          );
+          // Any stored account starts locked, finished or not: an onboarding
+          // abandoned after the Connect step already holds a Cloudflare
+          // credential, and resuming it must not skip the password.
+          setStatus(account ? 'locked' : 'no-account');
         }
       })
       .catch((cause: unknown) => {
@@ -108,7 +125,12 @@ export function AuthGateProvider({
         return;
       }
       isForeground.current = false;
-      setStatus((current) => (current === 'unlocked' ? 'locked' : current));
+      setStatus((current) =>
+        current === 'unlocked' ||
+        (current === 'onboarding' && hasAccount.current)
+          ? 'locked'
+          : current,
+      );
     });
 
     return () => subscription.remove();
@@ -123,12 +145,24 @@ export function AuthGateProvider({
           return;
         }
         setErrorKey(null);
-        setStatus('unlocked');
+        setStatus(resumeOnboarding.current ? 'onboarding' : 'unlocked');
       },
       lock: () => setStatus('locked'),
-      onOnboardingCompleted: () => {
+      onAccountCreated: () => {
+        hasAccount.current = true;
+        resumeOnboarding.current = true;
+        // A first-time user is still `no-account` here. Both statuses show the
+        // onboarding screen, but only `onboarding` re-locks on background.
+        setStatus((current) =>
+          current === 'no-account' ? 'onboarding' : current,
+        );
+      },
+      onOnboardingCompleted: (options) => {
+        resumeOnboarding.current = false;
         setErrorKey(null);
-        setStatus(isForeground.current ? 'unlocked' : 'locked');
+        setStatus(
+          isForeground.current && !options?.interrupted ? 'unlocked' : 'locked',
+        );
       },
       reportAccountError: (cause?: unknown) => {
         setErrorKey(errorKeyFor(cause));
@@ -145,6 +179,8 @@ export function AuthGateProvider({
           // account created on this device.
           await wipeCloudflareData();
           await deleteAccount();
+          hasAccount.current = false;
+          resumeOnboarding.current = false;
           setErrorKey(null);
           setStatus('no-account');
         } catch {

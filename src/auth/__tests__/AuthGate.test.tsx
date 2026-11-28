@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import { AuthGateProvider, useAuth } from '../AuthGate';
 import { resetAutoLock, suspendAutoLock } from '../autoLock';
 import {
+  advanceOnboarding,
   completeOnboarding,
   createAccount,
   createOnboardingAccount,
@@ -94,7 +95,7 @@ test('loads an existing account as locked and supports lock transitions', async 
   expect(result.current.status).toBe('locked');
 });
 
-test('loads an incomplete account into onboarding instead of locked', async () => {
+test('an unfinished onboarding launches locked and resumes after unlock', async () => {
   await createOnboardingAccount(
     { organization: 'Acme', name: 'Ada', email: 'ada@example.com' },
     'hunter2secret',
@@ -102,7 +103,67 @@ test('loads an incomplete account into onboarding instead of locked', async () =
   );
   const { result } = renderHook(() => useAuth(), { wrapper });
 
-  await waitFor(() => expect(result.current.status).toBe('onboarding'));
+  // The Connect step may already have stored a Cloudflare credential, so the
+  // password comes before onboarding picks up where it stopped.
+  await waitFor(() => expect(result.current.status).toBe('locked'));
+
+  act(() => result.current.unlock());
+
+  expect(result.current.status).toBe('onboarding');
+});
+
+test('a credential bound before "Enter console" is not reachable without unlocking', async () => {
+  await createOnboardingAccount(
+    { organization: 'Acme', name: 'Ada', email: 'ada@example.com' },
+    'hunter2secret',
+    false,
+  );
+  await advanceOnboarding('done');
+  const { result } = renderHook(() => useAuth(), { wrapper });
+
+  await waitFor(() => expect(result.current.status).toBe('locked'));
+});
+
+test('locks onboarding on background once the account exists', async () => {
+  const { result } = renderHook(() => useAuth(), { wrapper });
+  await waitFor(() => expect(result.current.status).toBe('no-account'));
+
+  // Nothing to protect before an account exists.
+  act(() => appStateListener?.('background'));
+  expect(result.current.status).toBe('no-account');
+  act(() => appStateListener?.('active'));
+
+  await createOnboardingAccount(
+    { organization: 'Acme', name: 'Ada', email: 'ada@example.com' },
+    'hunter2secret',
+    false,
+  );
+  act(() => result.current.onAccountCreated());
+  act(() => appStateListener?.('background'));
+
+  expect(result.current.status).toBe('locked');
+
+  act(() => appStateListener?.('active'));
+  act(() => result.current.unlock());
+  expect(result.current.status).toBe('onboarding');
+});
+
+test('onboarding stays unlocked while an auth sheet suspends the lock', async () => {
+  await createOnboardingAccount(
+    { organization: 'Acme', name: 'Ada', email: 'ada@example.com' },
+    'hunter2secret',
+    false,
+  );
+  const { result } = renderHook(() => useAuth(), { wrapper });
+  await waitFor(() => expect(result.current.status).toBe('locked'));
+  act(() => result.current.unlock());
+
+  // The Connect step's OAuth sheet must not tear the step down mid-flow.
+  const release = suspendAutoLock();
+  act(() => appStateListener?.('inactive'));
+  expect(result.current.status).toBe('onboarding');
+  act(() => appStateListener?.('active'));
+  release();
 });
 
 test('loads a completed onboarding account as locked on the next launch', async () => {
@@ -125,10 +186,34 @@ test('completes onboarding into tabs only while foregrounded', async () => {
     false,
   );
   const { result } = renderHook(() => useAuth(), { wrapper });
-  await waitFor(() => expect(result.current.status).toBe('onboarding'));
+  await waitFor(() => expect(result.current.status).toBe('locked'));
+  act(() => result.current.unlock());
+  expect(result.current.status).toBe('onboarding');
 
   act(() => result.current.onOnboardingCompleted());
+  expect(result.current.status).toBe('unlocked');
 
+  // Finished onboarding no longer routes an unlock back into it.
+  act(() => appStateListener?.('background'));
+  act(() => appStateListener?.('active'));
+  act(() => result.current.unlock());
+  expect(result.current.status).toBe('unlocked');
+});
+
+test('an interrupted completion locks instead of entering the console', async () => {
+  await createOnboardingAccount(
+    { organization: 'Acme', name: 'Ada', email: 'ada@example.com' },
+    'hunter2secret',
+    false,
+  );
+  const { result } = renderHook(() => useAuth(), { wrapper });
+  await waitFor(() => expect(result.current.status).toBe('locked'));
+  act(() => result.current.unlock());
+
+  act(() => result.current.onOnboardingCompleted({ interrupted: true }));
+  expect(result.current.status).toBe('locked');
+
+  act(() => result.current.unlock());
   expect(result.current.status).toBe('unlocked');
 });
 
@@ -203,7 +288,8 @@ test('late onboarding completion while backgrounded stays locked', async () => {
     false,
   );
   const { result } = renderHook(() => useAuth(), { wrapper });
-  await waitFor(() => expect(result.current.status).toBe('onboarding'));
+  await waitFor(() => expect(result.current.status).toBe('locked'));
+  act(() => result.current.unlock());
 
   act(() => appStateListener?.('background'));
   act(() => result.current.onOnboardingCompleted());
